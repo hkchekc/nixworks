@@ -18,10 +18,9 @@ def _populate_start_end(multi_tags):
         if isinstance(mt, nix.MultiTag):
             start.extend(list(mt.positions))
             if mt.extents is not None:
-                ext = mt.extents[:]
-                end.extend([e+p for e,p in zip(ext, mt.positions[:])])
+                end.extend([e+p for e,p in zip(mt.extents[:], mt.positions[:])])
             else:
-                end.extend(list(mt.positions))
+                end.extend(mt.positions)
         else:
             start.append(mt.position)
             if mt.extent is not None:
@@ -39,26 +38,41 @@ def _in_range(point, start, end):
     return True
 
 
-def _sorting(li):  # li is the start values
-    if len(np.array(li).shape) == 1:
-        sort_idx = np.argsort(li)
-        sorted_starts = sorted(li)
-    else: # sort only by first dimension
-        sort_idx = np.argsort(np.transpose(li)[0])
-        sorted_starts = sorted(li, key=lambda l: li[0])
-    return sort_idx, sorted_starts
+def _sorting(starts, ends):  # li is the start values
+    sort = [i for i in sorted(enumerate(starts), key=lambda s: s[1])]
+    sorted_starts = np.array([s[1] for s in sort])
+    sorted_ends = np.array([ends[s[0]] for s in sort])
+    return sorted_starts, sorted_ends
 
 
-def union(multi_tags, ref):
+def union(ref, multi_tags):
     # now the simple case of 2 tags
     _check_valid(multi_tags, ref)
     if not isinstance(ref, nix.DataArray):
         ref = multi_tags[0].references[ref]
     starts, ends = _populate_start_end(multi_tags)
-    for i, st in enumerate(starts):
+    starts, ends = _sorting(starts, ends)
+    start_list = []
+    end_list = []
+    for i, st in enumerate(starts):  # check if any duplicate
+        covered = False
+        for ti, tmp_st, tmp_ed in enumerate(zip(start_list, end_list)):
+            if _in_range(st, tmp_st, tmp_ed) or _in_range(ends[i], tmp_st, tmp_ed):
+                covered = True
+                if not _in_range(ends[i], tmp_st, tmp_ed):  # ends[i] > tmp_ed
+                    end_list[ti] = ends[i]
+                elif not _in_range(st, tmp_st, tmp_ed):  # st < tmp_st
+                    start_list[ti] = st
+        # if not contiguous, then mark as new slices
+        if not covered:
+            start_list.append(st)
+            end_list.append(ends[i])
+    view_list = []
+    for true_st, true_ed in zip(start_list, end_list):
+        true_slice = tuple([slice(x, y+1) for x, y in zip(true_st, true_ed)])
+        view_list.append(nix.data_view.DataView(ref, true_slice))
+    return view_list
 
-
-    return nix.data_view.DataView(ref, None)
 
 def intersection(ref, multi_tags):
     _check_valid(multi_tags, ref)

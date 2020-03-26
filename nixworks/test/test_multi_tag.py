@@ -45,6 +45,8 @@ class TestMultiTag(unittest.TestCase):
         t1.extent = [30]
         i = intersection(self.ref1d, [t1,t2])
         np.testing.assert_array_almost_equal(np.array(i), t2.tagged_data(0)[:])
+        # union
+        # u = union(self.ref1d, [t1,t2])
 
     def test_multi_nd(self):
         d = np.zeros((2, 3))
@@ -66,4 +68,5 @@ class TestMultiTag(unittest.TestCase):
         i = intersection(self.ref3d, [t1,t2])
         np.testing.assert_array_almost_equal(i[:], self.arr3d[3,3,3])
         # union
+        # u = union(self.ref3d, [t1])
 
