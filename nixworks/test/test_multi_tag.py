@@ -1,10 +1,11 @@
-import numpy as np
-import nixio as nix
+
 import unittest
-from ..multi_tag import *
+from ..multi_tag import intersection, union
 from tempfile import mkdtemp
 import os
 import shutil
+import numpy as np
+import nixio as nix
 
 
 class TestMultiTag(unittest.TestCase):
@@ -18,7 +19,7 @@ class TestMultiTag(unittest.TestCase):
         self.arr1d = np.arange(1000)
         self.ref1d = self.block.create_data_array("test1d", "test", data=self.arr1d)
         self.ref1d.append_set_dimension()
-        self.arr3d = np.arange(1000).reshape((10,10,10))
+        self.arr3d = np.arange(1000).reshape((10, 10, 10))
         self.ref3d = self.block.create_data_array("test3d", "test", data=self.arr3d)
         self.ref3d.append_set_dimension()
         self.ref3d.append_set_dimension()
@@ -35,18 +36,23 @@ class TestMultiTag(unittest.TestCase):
         # detached - no intersection
         t1.extent = [5]
         t2.extent = [5]
-        i = intersection(self.ref1d, [t1,t2])
+        i = intersection(self.ref1d, [t1, t2])
         assert i is None
+        u = union(self.ref1d, [t1, t2])
+        np.testing.assert_array_equal(u[0], self.arr1d[0:6])
+        np.testing.assert_array_equal(u[1], self.arr1d[10:16])
         # intersected
         t1.extent = [12]
-        i = intersection(self.ref1d, [t1,t2])
+        i = intersection(self.ref1d, [t1, t2])
         np.testing.assert_array_almost_equal(np.array(i), self.arr1d[10:13])
+        u = union(self.ref1d, [t1, t2])
+        np.testing.assert_array_equal(u[0], self.arr1d[0:16])
         # covered
         t1.extent = [30]
-        i = intersection(self.ref1d, [t1,t2])
+        i = intersection(self.ref1d, [t1, t2])
         np.testing.assert_array_almost_equal(np.array(i), t2.tagged_data(0)[:])
-        # union
-        # u = union(self.ref1d, [t1,t2])
+        u = union(self.ref1d, [t1, t2])
+        np.testing.assert_array_equal(u[0], t1.tagged_data(0)[:])
 
     def test_multi_nd(self):
         d = np.zeros((2, 3))
@@ -65,8 +71,10 @@ class TestMultiTag(unittest.TestCase):
         # intersections
         i = intersection(self.ref3d, [t1])
         np.testing.assert_array_almost_equal(i[:], self.arr3d[1:4, 1:4, 1:4])
-        i = intersection(self.ref3d, [t1,t2])
-        np.testing.assert_array_almost_equal(i[:], self.arr3d[3,3,3])
+        i = intersection(self.ref3d, [t1, t2])
+        np.testing.assert_array_almost_equal(i[:], self.arr3d[3, 3, 3])
         # union
-        # u = union(self.ref3d, [t1])
-
+        u = union(self.ref3d, [t1])
+        np.testing.assert_array_almost_equal(u[0][:], self.arr3d[0:5, 0:5, 0:5])
+        u = union(self.ref3d, [t1, t2])
+        np.testing.assert_array_almost_equal(u[0][:], self.arr3d[0:6, 0:6, 0:6])

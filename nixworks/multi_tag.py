@@ -18,13 +18,13 @@ def _populate_start_end(multi_tags):
         if isinstance(mt, nix.MultiTag):
             start.extend(list(mt.positions))
             if mt.extents is not None:
-                end.extend([e+p for e,p in zip(mt.extents[:], mt.positions[:])])
+                end.extend([e+p for e, p in zip(mt.extents[:], mt.positions[:])])
             else:
                 end.extend(mt.positions)
         else:
             start.append(mt.position)
             if mt.extent is not None:
-                e = [e+p for e,p in zip(mt.extent, mt.position)]
+                e = [e+p for e, p in zip(mt.extent, mt.position)]
                 end.append(e)
     start = np.array(start, dtype=int)
     end = np.array(end, dtype=int)
@@ -39,6 +39,8 @@ def _in_range(point, start, end):
 
 
 def _sorting(starts, ends):  # li is the start values
+    starts = starts.tolist()
+    ends = ends.tolist()
     sort = [i for i in sorted(enumerate(starts), key=lambda s: s[1])]
     sorted_starts = np.array([s[1] for s in sort])
     sorted_ends = np.array([ends[s[0]] for s in sort])
@@ -46,7 +48,13 @@ def _sorting(starts, ends):  # li is the start values
 
 
 def union(ref, multi_tags):
-    # now the simple case of 2 tags
+    """
+    Function to return the (non-overlapping) union of area tagged by multiple Tags
+    or MultiTags of a specified DataArray.
+    :param ref: the referenced array
+    :param multi_tags: Tags or MultiTags that point to the tagged data
+    :return: a list of DataViews
+    """
     _check_valid(multi_tags, ref)
     if not isinstance(ref, nix.DataArray):
         ref = multi_tags[0].references[ref]
@@ -56,7 +64,7 @@ def union(ref, multi_tags):
     end_list = []
     for i, st in enumerate(starts):  # check if any duplicate
         covered = False
-        for ti, tmp_st, tmp_ed in enumerate(zip(start_list, end_list)):
+        for ti, (tmp_st, tmp_ed) in enumerate(zip(start_list, end_list)):
             if _in_range(st, tmp_st, tmp_ed) or _in_range(ends[i], tmp_st, tmp_ed):
                 covered = True
                 if not _in_range(ends[i], tmp_st, tmp_ed):  # ends[i] > tmp_ed
@@ -75,6 +83,12 @@ def union(ref, multi_tags):
 
 
 def intersection(ref, multi_tags):
+    """
+    Function to return the overlapping area in a specified DataArray tagged by multiple Tags/MultiTags.
+    :param ref: the referenced array
+    :param multi_tags: Tags or MultiTags that point to the tagged data
+    :return: a DataView
+    """
     _check_valid(multi_tags, ref)
     if not isinstance(ref, nix.DataArray):
         ref = multi_tags[0].references[ref]
@@ -93,4 +107,3 @@ def intersection(ref, multi_tags):
             return None
     true_slice = tuple([slice(x, y+1) for x, y in zip(true_start, true_end)])
     return nix.data_view.DataView(ref, true_slice)
-
