@@ -1,5 +1,6 @@
 import numpy as np
 import nixio as nix
+import itertools
 from nixio import exceptions, data_view
 
 
@@ -49,7 +50,7 @@ def _in_range(point, start, end):
     return True
 
 
-def _sorting(starts, ends):  # li is the start values
+def _sorting(starts, ends):
     starts = starts.tolist()
     ends = ends.tolist()
     sort = [i for i in sorted(enumerate(starts), key=lambda s: s[1])]
@@ -77,18 +78,43 @@ def intersection(ref, multi_tags):
             true_start = st
         if _in_range(ends[i], true_start, true_end):
             true_end = ends[i]
-        # Any one point that is not in range means that there are no intersection
+        #  check if other corners maybe in range
         if not _in_range(st, true_start, true_end) and not \
                 _in_range(ends[i], true_start, true_end):
-            return None
+            if isinstance(st, np.ndarray):
+                tmp_starts = [(x, y) for x, y in zip(st,true_start)]
+                tmp_ends = [(x, y) for x, y in zip(ends[i],true_end)]
+            else:
+                tmp_starts = [(st, true_start)]
+                tmp_ends = [(ends[i], true_end)]
+            new_starts = itertools.product(*tmp_starts)
+            new_ends = itertools.product(*tmp_ends)
+            # based on the (probably true) assumption that only one such point in range
+            start_update = False
+            end_update = False
+            for news in new_starts:
+                if _in_range(news, true_start, true_end) and _in_range(news, st, ends[i]):
+                    start_update = True
+                    tmp_start = news
+                    break
+            for newe in new_ends:
+                if _in_range(newe, true_start, true_end) and _in_range(newe, st, ends[i]):
+                    end_update = True
+                    true_end = newe
+                    break
+            print(start_update, end_update)
+            if not start_update and not end_update:
+                return None
+            elif start_update+end_update == 1:
+                raise ValueError()
+            elif start_update and end_update:
+                true_start = tmp_start
+    print(type(true_start), true_start)
     if isinstance(true_start, np.ndarray):
         true_slice = tuple([slice(x, y+1) for x, y in zip(true_start, true_end)])
     else:
         true_slice = (slice(true_start, true_end + 1), )
     return nix.data_view.DataView(ref, true_slice)
-
-def _intersect(point, start, end):
-    pass
 
 
 def union(ref, multi_tags):
