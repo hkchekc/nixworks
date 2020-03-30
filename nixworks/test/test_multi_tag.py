@@ -14,7 +14,6 @@ class TestMultiTag(unittest.TestCase):
         self.p = mkdtemp()
         self.testfilename = os.path.join(self.p, "test.nix")
         self.file = nix.File.open(self.testfilename, nix.FileMode.Overwrite)
-
         self.block = self.file.create_block("test_block", "abc")
         self.arr1d = np.arange(1000)
         self.ref1d = self.block.create_data_array("test1d", "test", data=self.arr1d)
@@ -58,13 +57,14 @@ class TestMultiTag(unittest.TestCase):
         d = np.zeros((2, 3))
         d[1] += 1
         p1 = self.block.create_data_array("pos1", "pos", data=d)
+        t1 = self.block.create_multi_tag("t1", "test", positions=p1)
+        e1 = self.block.create_data_array("ext1", "ext", data=np.ones((2, 3))*3)
+        t1.extents = e1
+        ###################################################################
         a = np.array([[2, 2, 2], [3, 3, 3]])
         p2 = self.block.create_data_array("pos2", "pos", data=a)
-        t1 = self.block.create_multi_tag("t1", "test", positions=p1)
         t2 = self.block.create_multi_tag("t2", "test", positions=p2)
-        e1 = self.block.create_data_array("ext1", "ext", data=np.ones((2, 3))*3)
         e2 = self.block.create_data_array("ext2", "ext", data=np.ones((2, 3))*2)
-        t1.extents = e1
         t2.extents = e2
         t1.references.append(self.ref3d)
         t2.references.append(self.ref3d)
@@ -77,4 +77,29 @@ class TestMultiTag(unittest.TestCase):
         u = union(self.ref3d, [t1])
         np.testing.assert_array_almost_equal(u[0][:], self.arr3d[0:5, 0:5, 0:5])
         u = union(self.ref3d, [t1, t2])
+        print(u[0][:].size)
         np.testing.assert_array_almost_equal(u[0][:], self.arr3d[0:6, 0:6, 0:6])
+        p3 = self.block.create_data_array("pos3", "pos", data=np.array([[5, 5, 5], [6, 6, 6]]))
+        t3 = self.block.create_multi_tag("t3", "test", positions=p3)
+        e3 = self.block.create_data_array("ext3", "ext", data=np.ones((2, 3)) * 3)
+        t3.extents = e3
+        t3.references.append(self.ref3d)
+        u = union(self.ref3d, [t1, t3])
+        np.testing.assert_array_almost_equal(u[0][:], self.arr3d[:, :, :])
+        np.testing.assert_array_almost_equal(u[0][:], self.arr3d[:, :, :])
+
+    def test_flat_positions(self):
+        # 1d position and extent
+        pos3 = self.block.create_data_array("pos3", "pos", data=np.array([1, 0, 0]))
+        pos4 = self.block.create_data_array("pos4", "pos", data=np.array([0, 1, 1]))
+        ext3 = self.block.create_data_array("ext3", "ext", data=np.array([2, 2, 2]))
+        ext4 = self.block.create_data_array("ext4", "ext", data=np.array([2, 2, 2]))
+        t3 = self.block.create_multi_tag("t3", "test", positions=pos3)
+        t3.extents = ext3
+        t4 = self.block.create_multi_tag("t4", "test", positions=pos4)
+        t4.extents = ext4
+        t3.references.append(self.ref1d)
+        t4.references.append(self.ref1d)
+        intersection(0, [t3, t4])
+
+

@@ -1,5 +1,6 @@
 import numpy as np
 import nixio as nix
+from nixio import exceptions, data_view
 
 
 def _check_valid(multi_tags, ref):
@@ -7,8 +8,10 @@ def _check_valid(multi_tags, ref):
         if not (isinstance(mt, nix.MultiTag) or isinstance(mt, nix.Tag)):
             raise TypeError("Input must be either MultiTags or Tags.")
     for mt in multi_tags:
-        if ref not in mt.references:
+        if ref not in mt.references and not isinstance(ref, int):
             raise ValueError("This DataArray is not referenced.")
+        if isinstance(ref, int) and ref > len(mt.references):
+            raise nix.exceptions.OutOfBounds("The index given is out of bound.")
 
 
 def _populate_start_end(multi_tags):
@@ -28,13 +31,21 @@ def _populate_start_end(multi_tags):
                 end.append(e)
     start = np.array(start, dtype=int)
     end = np.array(end, dtype=int)
+    if start.shape != end.shape:
+        raise nix.exceptions.IncompatibleDimensions("Start and End position "
+                                                    "shapes do not match.", "")
     return start, end
 
 
 def _in_range(point, start, end):
-    for i, st in enumerate(start):
-        if point[i] < st or point[i] > end[i]:
-                return False
+    # loop for each dimension
+    if isinstance(start, np.ndarray):
+        for i, st in enumerate(start):
+            if point[i] < st or point[i] > end[i]:
+                    return False
+    else:
+        if point < start or point > end:
+            return False
     return True
 
 
@@ -45,41 +56,6 @@ def _sorting(starts, ends):  # li is the start values
     sorted_starts = np.array([s[1] for s in sort])
     sorted_ends = np.array([ends[s[0]] for s in sort])
     return sorted_starts, sorted_ends
-
-
-def union(ref, multi_tags):
-    """
-    Function to return the (non-overlapping) union of area tagged by multiple Tags
-    or MultiTags of a specified DataArray.
-    :param ref: the referenced array
-    :param multi_tags: Tags or MultiTags that point to the tagged data
-    :return: a list of DataViews
-    """
-    _check_valid(multi_tags, ref)
-    if not isinstance(ref, nix.DataArray):
-        ref = multi_tags[0].references[ref]
-    starts, ends = _populate_start_end(multi_tags)
-    starts, ends = _sorting(starts, ends)
-    start_list = []
-    end_list = []
-    for i, st in enumerate(starts):  # check if any duplicate
-        covered = False
-        for ti, (tmp_st, tmp_ed) in enumerate(zip(start_list, end_list)):
-            if _in_range(st, tmp_st, tmp_ed) or _in_range(ends[i], tmp_st, tmp_ed):
-                covered = True
-                if not _in_range(ends[i], tmp_st, tmp_ed):  # ends[i] > tmp_ed
-                    end_list[ti] = ends[i]
-                elif not _in_range(st, tmp_st, tmp_ed):  # st < tmp_st
-                    start_list[ti] = st
-        # if not contiguous, then mark as new slices
-        if not covered:
-            start_list.append(st)
-            end_list.append(ends[i])
-    view_list = []
-    for true_st, true_ed in zip(start_list, end_list):
-        true_slice = tuple([slice(x, y+1) for x, y in zip(true_st, true_ed)])
-        view_list.append(nix.data_view.DataView(ref, true_slice))
-    return view_list
 
 
 def intersection(ref, multi_tags):
@@ -105,5 +81,51 @@ def intersection(ref, multi_tags):
         if not _in_range(st, true_start, true_end) and not \
                 _in_range(ends[i], true_start, true_end):
             return None
-    true_slice = tuple([slice(x, y+1) for x, y in zip(true_start, true_end)])
+    if isinstance(true_start, np.ndarray):
+        true_slice = tuple([slice(x, y+1) for x, y in zip(true_start, true_end)])
+    else:
+        true_slice = (slice(true_start, true_end + 1), )
     return nix.data_view.DataView(ref, true_slice)
+
+def _intersect(point, start, end):
+    pass
+
+
+def union(ref, multi_tags):
+    """
+    Function to return the (non-overlapping) union of area tagged by multiple Tags
+    or MultiTags of a specified DataArray.
+    :param ref: the referenced array
+    :param multi_tags: Tags or MultiTags that point to the tagged data
+    :return: a list of DataViews
+    """
+    _check_valid(multi_tags, ref)
+    if not isinstance(ref, nix.DataArray):
+        ref = multi_tags[0].references[ref]
+    starts, ends = _populate_start_end(multi_tags)
+    starts, ends = _sorting(starts, ends)
+    start_list = []
+    end_list = []
+    for i, st in enumerate(starts):  # check if any duplicate
+        for ti, (tmp_st, tmp_ed) in enumerate(zip(start_list, end_list)):
+            if _in_range(st, tmp_st, tmp_ed) or _in_range(ends[i], tmp_st, tmp_ed):
+                # The new area is completely covered by old area, ignore!
+                if _in_range(st, tmp_st, tmp_ed) and _in_range(ends[i], tmp_st, tmp_ed):
+                    continue
+                else:
+                    # search for intersection
+                    # create 1 or 2 new dataview
+                    pass
+                # if not _in_range(ends[i], tmp_st, tmp_ed):  # ends[i] > tmp_ed
+                #     end_list[ti] = ends[i]
+                # elif not _in_range(st, tmp_st, tmp_ed):  # st < tmp_st
+                #     start_list[ti] = st
+            # if not contiguous, then mark as new slices
+            else:
+                start_list.append(st)
+                end_list.append(ends[i])
+    view_list = []
+    for true_st, true_ed in zip(start_list, end_list):
+        true_slice = tuple([slice(x, y+1) for x, y in zip(true_st, true_ed)])
+        view_list.append(nix.data_view.DataView(ref, true_slice))
+    return view_list
