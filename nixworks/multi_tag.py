@@ -16,8 +16,8 @@ def _check_valid(multi_tags, ref):
 
 
 def _populate_start_end(multi_tags):
-    start = list()
-    end = list()
+    start = []
+    end = []
     for mt in multi_tags:
         if isinstance(mt, nix.MultiTag):
             start.extend(list(mt.positions))
@@ -74,42 +74,9 @@ def intersection(ref, multi_tags):
     true_end = ends[0]
     for j, st in enumerate(starts[1:]):
         i = j + 1
-        if _in_range(st, true_start, true_end):
-            true_start = st
-        if _in_range(ends[i], true_start, true_end):
-            true_end = ends[i]
-        #  check if other corners maybe in range
-        if not _in_range(st, true_start, true_end) and not \
-                _in_range(ends[i], true_start, true_end):
-            if isinstance(st, np.ndarray):
-                tmp_starts = [(x, y) for x, y in zip(st,true_start)]
-                tmp_ends = [(x, y) for x, y in zip(ends[i],true_end)]
-            else:
-                tmp_starts = [(st, true_start)]
-                tmp_ends = [(ends[i], true_end)]
-            new_starts = itertools.product(*tmp_starts)
-            new_ends = itertools.product(*tmp_ends)
-            # based on the (probably true) assumption that only one such point in range
-            start_update = False
-            end_update = False
-            for news in new_starts:
-                if _in_range(news, true_start, true_end) and _in_range(news, st, ends[i]):
-                    start_update = True
-                    tmp_start = news
-                    break
-            for newe in new_ends:
-                if _in_range(newe, true_start, true_end) and _in_range(newe, st, ends[i]):
-                    end_update = True
-                    true_end = newe
-                    break
-            print(start_update, end_update)
-            if not start_update and not end_update:
-                return None
-            elif start_update+end_update == 1:
-                raise ValueError()
-            elif start_update and end_update:
-                true_start = tmp_start
-    print(type(true_start), true_start)
+        true_start, true_end = _intersect(st, ends[i], true_start, true_end)
+        if true_start is None:  # true_end must also be None
+            return None
     if isinstance(true_start, np.ndarray):
         true_slice = tuple([slice(x, y+1) for x, y in zip(true_start, true_end)])
     else:
@@ -117,7 +84,76 @@ def intersection(ref, multi_tags):
     return nix.data_view.DataView(ref, true_slice)
 
 
-def union(ref, multi_tags):
+def _intersect(st, ed, true_start, true_end):
+    # Internal function to check for intersection and return its start and end
+    if _in_range(st, true_start, true_end):
+        true_start = st
+    if _in_range(ed, true_start, true_end):
+        true_end = ed
+    #  check if other corners maybe in range
+    if not _in_range(st, true_start, true_end) and not \
+            _in_range(ed, true_start, true_end):
+        if isinstance(st, np.ndarray):
+            tmp_starts = [(x, y) for x, y in zip(st, true_start)]
+            tmp_ends = [(x, y) for x, y in zip(ed, true_end)]
+        else:
+            tmp_starts = [(st, true_start)]
+            tmp_ends = [(ed, true_end)]
+        new_starts = itertools.product(*tmp_starts)
+        new_ends = itertools.product(*tmp_ends)
+        # based on the (probably true) assumption that only one such point in range
+        start_update = False
+        end_update = False
+        for news in new_starts:
+            if _in_range(news, true_start, true_end) and _in_range(news, st, ed):
+                start_update = True
+                tmp_start = news
+                break
+        for newe in new_ends:
+            if _in_range(newe, true_start, true_end) and _in_range(newe, st, ed):
+                end_update = True
+                true_end = newe
+                break
+        if not start_update and not end_update:
+            return None, None
+        elif start_update + end_update == 1:
+            raise ValueError("Only start or end point of intersection exists.")
+        elif start_update and end_update:
+            true_start = tmp_start
+    return true_start, true_end
+
+
+def group_slices(st, ed, start_list, end_list):
+    inter_idx = None
+    for grp_i, (grp_st, grp_ed) in enumerate(zip(start_list, end_list)):
+        for single_st, single_ed in zip(grp_st, grp_ed):
+            # The new area is completely covered by old area, ignore
+            if _in_range(st, single_st, single_ed) and _in_range(ed, single_st, single_ed):
+                return start_list, end_list
+            check_intersect = _intersect(st, ed, single_st, single_ed)
+            if check_intersect[0] is None:
+                # create new group
+                start_list.append([st])
+                start_list.append([ed])
+            else:
+                if inter_idx is None:  # there is an intersection
+                    inter_idx = grp_i
+                    start_list[grp_i].append(st)
+                    end_list[grp_i].append(ed)
+                    break # break one loop, start from next group
+                else:  # there are previous intersection with this st, ed pair
+                    # merge the previous intersected group and current group
+                    # note that the current (st, ed) is already in the previous grp
+                    start_list[inter_idx].extend(grp_st)
+                    end_list[inter_idx].extend(grp_ed)
+                    # pop the current group
+                    del start_list[grp_i]
+                    del end_list[grp_i]
+    return start_list, end_list
+
+
+
+def union(ref, multi_tags, dimension_prior=0):
     """
     Function to return the (non-overlapping) union of area tagged by multiple Tags
     or MultiTags of a specified DataArray.
@@ -130,26 +166,13 @@ def union(ref, multi_tags):
         ref = multi_tags[0].references[ref]
     starts, ends = _populate_start_end(multi_tags)
     starts, ends = _sorting(starts, ends)
-    start_list = []
-    end_list = []
-    for i, st in enumerate(starts):  # check if any duplicate
-        for ti, (tmp_st, tmp_ed) in enumerate(zip(start_list, end_list)):
-            if _in_range(st, tmp_st, tmp_ed) or _in_range(ends[i], tmp_st, tmp_ed):
-                # The new area is completely covered by old area, ignore!
-                if _in_range(st, tmp_st, tmp_ed) and _in_range(ends[i], tmp_st, tmp_ed):
-                    continue
-                else:
-                    # search for intersection
-                    # create 1 or 2 new dataview
-                    pass
-                # if not _in_range(ends[i], tmp_st, tmp_ed):  # ends[i] > tmp_ed
-                #     end_list[ti] = ends[i]
-                # elif not _in_range(st, tmp_st, tmp_ed):  # st < tmp_st
-                #     start_list[ti] = st
-            # if not contiguous, then mark as new slices
-            else:
-                start_list.append(st)
-                end_list.append(ends[i])
+    start_list = [[starts[0]]]
+    end_list = [[ends[0]]]
+    for j, st in enumerate(starts[1:]):
+        i = j+1
+        start_list, end_list = group_slices(st, ends[i], start_list, end_list)
+    
+
     view_list = []
     for true_st, true_ed in zip(start_list, end_list):
         true_slice = tuple([slice(x, y+1) for x, y in zip(true_st, true_ed)])
