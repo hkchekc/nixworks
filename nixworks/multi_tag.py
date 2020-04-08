@@ -99,7 +99,7 @@ def _intersect(st, ed, true_start, true_end):
         else:
             tmp_starts = [(st, true_start)]
             tmp_ends = [(ed, true_end)]
-        new_starts = itertools.product(*tmp_starts)
+        new_starts = itertools.product(*tmp_starts)  # all corners of the range
         new_ends = itertools.product(*tmp_ends)
         # based on the (probably true) assumption that only one such point in range
         start_update = False
@@ -123,34 +123,38 @@ def _intersect(st, ed, true_start, true_end):
     return true_start, true_end
 
 
-def group_slices(st, ed, start_list, end_list):
+def _group_slices(st, ed, start_list, end_list, intersect_list):
     inter_idx = None
     for grp_i, (grp_st, grp_ed) in enumerate(zip(start_list, end_list)):
         for single_st, single_ed in zip(grp_st, grp_ed):
             # The new area is completely covered by old area, ignore
             if _in_range(st, single_st, single_ed) and _in_range(ed, single_st, single_ed):
-                return start_list, end_list
+                intersect_list.append((None, None))
+                return start_list, end_list, intersect_list
             check_intersect = _intersect(st, ed, single_st, single_ed)
             if check_intersect[0] is None:
                 # create new group
                 start_list.append([st])
                 start_list.append([ed])
+                intersect_list.append([None])
             else:
-                if inter_idx is None:  # there is an intersection
+                if inter_idx is None:  # there is an intersection but no previous intersections
                     inter_idx = grp_i
                     start_list[grp_i].append(st)
                     end_list[grp_i].append(ed)
-                    break # break one loop, start from next group
+                    intersect_list[grp_i] = [check_intersect]
+                    break  # break one loop, start from next group
                 else:  # there are previous intersection with this st, ed pair
                     # merge the previous intersected group and current group
                     # note that the current (st, ed) is already in the previous grp
                     start_list[inter_idx].extend(grp_st)
                     end_list[inter_idx].extend(grp_ed)
+                    intersect_list[inter_idx].append([check_intersect])  # TODO: need test if all case is covered
                     # pop the current group
                     del start_list[grp_i]
                     del end_list[grp_i]
-    return start_list, end_list
-
+                    del intersect_list[grp_i]
+    return start_list, end_list, intersect_list
 
 
 def union(ref, multi_tags, dimension_prior=0):
@@ -159,6 +163,7 @@ def union(ref, multi_tags, dimension_prior=0):
     or MultiTags of a specified DataArray.
     :param ref: the referenced array
     :param multi_tags: Tags or MultiTags that point to the tagged data
+    :param dimension_prior: pass
     :return: a list of DataViews
     """
     _check_valid(multi_tags, ref)
@@ -168,13 +173,44 @@ def union(ref, multi_tags, dimension_prior=0):
     starts, ends = _sorting(starts, ends)
     start_list = [[starts[0]]]
     end_list = [[ends[0]]]
+    intersect_list = []
     for j, st in enumerate(starts[1:]):
         i = j+1
-        start_list, end_list = group_slices(st, ends[i], start_list, end_list)
-    
-
+        start_list, end_list, intersect_list = _group_slices(st, ends[i], start_list, end_list, intersect_list)
+    # start_list, end_list should have same shape
+    # create the DataViews
     view_list = []
-    for true_st, true_ed in zip(start_list, end_list):
-        true_slice = tuple([slice(x, y+1) for x, y in zip(true_st, true_ed)])
-        view_list.append(nix.data_view.DataView(ref, true_slice))
+    for gi, (st_grp, ed_grp) in enumerate(zip(start_list, end_list)):
+        if len(st_grp) == 1:
+            true_slice = tuple([slice(x, y + 1) for x, y in zip(st_grp[0], ed_grp[0])])
+            view_list.append(nix.data_view.DataView(ref, true_slice))
+        elif len(st_grp) == 2:
+            if _is_rectangle(st_grp[0], ed_grp[0], st_grp[1], ed_grp[1]):
+                true_slice = tuple([slice(x, y + 1) for x, y in zip(st_grp[0], ed_grp[1])])
+                view_list.append(nix.data_view.DataView(ref, true_slice))
+            else:
+                inter = intersect_list[gi][0]  # just one intersection as there are only 2
+
+        else:
+            combinations = itertools.combinations(range(len(st_grp)), 2)
+            for combi in combinations:
+                if _is_rectangle(st_grp[combi[0]], ed_grp[combi[0]], st_grp[combi[1]], ed_grp[combi[1]]):
+                    end_list[gi][combi[0]] = ed_grp[combi[1]]
+                    del start_list[gi][combi[1]]
+                    del end_list[gi][combi[1]]
+                    del intersect_list[gi][combi[1]-1]  # combi[1] will never be 0 as it is sorted
+            if len(start_list[gi]) == 1:  # everything in group combined to one rectangle
+                true_slice = tuple([slice(x, y + 1) for x, y in zip(st_grp[0], ed_grp[0])])
+                view_list.append(nix.data_view.DataView(ref, true_slice))
+            else:
+                pass
     return view_list
+
+
+def _is_rectangle(st1, ed1, st2, ed2):
+    st_mask = [i == j for i, j in zip(st1, st2)]
+    if sum(st_mask) >= len(st1) - 1:  # only one False
+        ed_mask = [i == j for i, j in zip(ed1, ed2)]
+        if st_mask == ed_mask:
+            return True
+    return False
