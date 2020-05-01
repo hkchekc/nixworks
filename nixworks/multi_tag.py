@@ -91,7 +91,7 @@ def _intersect(st, ed, true_start, true_end):
     if _in_range(ed, true_start, true_end):
         true_end = ed
     #  check if other corners maybe in range
-    if not _in_range(st, true_start, true_end) and not \
+    if not _in_range(st, true_start, true_end) or not \
             _in_range(ed, true_start, true_end):
         if isinstance(st, np.ndarray):
             tmp_starts = [(x, y) for x, y in zip(st, true_start)]
@@ -120,6 +120,8 @@ def _intersect(st, ed, true_start, true_end):
             raise ValueError("Only start or end point of intersection exists.")
         elif start_update and end_update:
             true_start = tmp_start
+    true_start = np.array(true_start)
+    true_end = np.array(true_end)
     return true_start, true_end
 
 
