@@ -124,7 +124,7 @@ def _intersect(st, ed, true_start, true_end):
 
 
 def _group_slices(st, ed, start_list, end_list, intersect_list):
-    inter_idx = None
+    intersected_grp__idx = None
     for grp_i, (grp_st, grp_ed) in enumerate(zip(start_list, end_list)):
         for single_st, single_ed in zip(grp_st, grp_ed):
             # The new area is completely covered by old area, ignore
@@ -138,18 +138,20 @@ def _group_slices(st, ed, start_list, end_list, intersect_list):
                 start_list.append([ed])
                 intersect_list.append([None])
             else:
-                if inter_idx is None:  # there is an intersection but no previous intersections
-                    inter_idx = grp_i
+                if intersected_grp__idx is None:  # there is an intersection but no previous intersections
+                    intersected_grp__idx = grp_i
                     start_list[grp_i].append(st)
                     end_list[grp_i].append(ed)
-                    intersect_list[grp_i] = [check_intersect]
-                    break  # break one loop, start from next group
+                    if len(intersect_list) < grp_i+1:
+                        intersect_list[grp_i] = [check_intersect]
+                    else:
+                        intersect_list[grp_i].append(check_intersect)
                 else:  # there are previous intersection with this st, ed pair
                     # merge the previous intersected group and current group
                     # note that the current (st, ed) is already in the previous grp
-                    start_list[inter_idx].extend(grp_st)
-                    end_list[inter_idx].extend(grp_ed)
-                    intersect_list[inter_idx].append([check_intersect])  # TODO: need test if all case is covered
+                    start_list[intersected_grp__idx].extend(grp_st)
+                    end_list[intersected_grp__idx].extend(grp_ed)
+                    intersect_list[intersected_grp__idx].append([check_intersect])  # TODO: need to extend the existing grp
                     # pop the current group
                     del start_list[grp_i]
                     del end_list[grp_i]
@@ -189,9 +191,23 @@ def union(ref, multi_tags, dimension_prior=0):
                 true_slice = tuple([slice(x, y + 1) for x, y in zip(st_grp[0], ed_grp[1])])
                 view_list.append(nix.data_view.DataView(ref, true_slice))
             else:
-                inter = intersect_list[gi][0]  # just one intersection as there are only 2
-
-        else:
+                # just one intersection as there are only 2 tags in the group
+                # first, sort by non-prior dimension first
+                inter_start, inter_end = intersect_list[gi][0]
+                tmp_end = ed_grp[0]
+                tmp_end[dimension_prior] = inter_start[dimension_prior]  # TODO: this is wrong in some case. because not sorted correctly
+                first_slice = tuple([slice(x, y) for x, y in zip(st_grp[0], tmp_end)])  # not include inter row
+                tmp_st = st_grp[0]
+                tmp_st[dimension_prior] = inter_start[dimension_prior]
+                tmp_end = ed_grp[0]
+                tmp_end[dimension_prior] = inter_end[dimension_prior]
+                mid_slice = tuple([slice(x, y + 1) for x, y in zip(tmp_st, tmp_end)])
+                tmp_st = st_grp[1]
+                tmp_st[dimension_prior] = inter_end[dimension_prior] + 1
+                last_slice = tuple([slice(x, y + 1) for x, y in zip(tmp_st, ed_grp[1])])
+                for i in [first_slice, mid_slice, last_slice]:
+                    view_list.append(nix.data_view.DataView(ref, i))
+        else:  # if the length of group is larger then
             combinations = itertools.combinations(range(len(st_grp)), 2)
             for combi in combinations:
                 if _is_rectangle(st_grp[combi[0]], ed_grp[combi[0]], st_grp[combi[1]], ed_grp[combi[1]]):
@@ -203,7 +219,7 @@ def union(ref, multi_tags, dimension_prior=0):
                 true_slice = tuple([slice(x, y + 1) for x, y in zip(st_grp[0], ed_grp[0])])
                 view_list.append(nix.data_view.DataView(ref, true_slice))
             else:
-                pass
+                first_st = st_grp[0]
     return view_list
 
 
